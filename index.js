@@ -39,6 +39,9 @@
     let solveCount = 0;
     let antiBlockInstalled = false;
     let antiBlockTimer = null;
+    let startFromIndex = 0; // 用户选择的起始题目索引
+    let isStarting = false; // 防止重复启动的标志
+    let startTaskTimer = null; // debounce 定时器
 
     // 兼容迁移：从旧测试键 pta_test_* 自动迁移到正式键 pta_*
     const migrateValueKey = (prodKey, legacyKey) => {
@@ -78,7 +81,7 @@
     ];
 
     const CONFIG = {
-    get autoNext() { return GM_getValue('pta_auto_next', false); },
+    get autoNext() { return GM_getValue('pta_auto_next', true); },
     set autoNext(v) { GM_setValue('pta_auto_next', v); },
     get funcLang() { return GM_getValue('pta_func_lang', 'C'); },
     set funcLang(v) { GM_setValue('pta_func_lang', v); },
@@ -188,7 +191,7 @@
             padding: 10px;
             text-align: center;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             color: #666;
             transition: all 0.2s;
         }
@@ -281,6 +284,70 @@
         .log-err { color: #dc3545; }
         .log-status { color: #999; font-style: italic; font-size: 11px; }
 
+        /* 题目列表样式 */
+        .problem-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .problem-item:hover {
+            background: #f8f9fa;
+            border-color: #007bff;
+        }
+        .problem-item.selected {
+            background: #e8f4ff;
+            border-color: #007bff;
+            border-width: 2px;
+        }
+        .problem-item.passed {
+            border-left: 4px solid #28a745;
+        }
+        .problem-item.not-passed {
+            border-left: 4px solid #dc3545;
+        }
+        .problem-number {
+            font-weight: 600;
+            color: #007bff;
+            min-width: 30px;
+        }
+        .problem-status {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            min-width: 60px;
+            text-align: center;
+        }
+        .problem-status.passed {
+            background: #d4edda;
+            color: #155724;
+        }
+        .problem-status.not-passed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .problem-title {
+            flex: 1;
+            color: #333;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .start-indicator {
+            background: #007bff;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: auto;
+        }
+
         #pta-helper-footer {
             padding: 12px;
             border-top: 1px solid #eee;
@@ -332,10 +399,22 @@
         </div>
         <div id="pta-helper-tabs">
             <div class="pta-tab active" data-tab="home">主页</div>
+            <div class="pta-tab" data-tab="problems">题目</div>
             <div class="pta-tab" data-tab="settings">设置</div>
         </div>
         <div id="pta-tab-content">
             <div id="home-tab" class="tab-pane active">
+                <div id="pta-status-bar" style="padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #eee; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="color: #666;">
+                        <strong>当前状态:</strong>
+                        <span id="auto-next-status" style="color: ${CONFIG.autoNext ? '#28a745' : '#dc3545'}; font-weight: 600;">
+                            ${CONFIG.autoNext ? '🚀 自动切换开启' : '⚠️ 自动切换关闭'}
+                        </span>
+                    </div>
+                    <div style="color: #999; font-size: 11px;">
+                        ${startFromIndex > 0 ? `从第 ${startFromIndex + 1} 题开始` : '从头开始'}
+                    </div>
+                </div>
                 <div id="pta-helper-log"></div>
                 <div id="pta-helper-footer">
                     <button id="start-btn" class="pta-btn">开始答题</button>
@@ -343,8 +422,42 @@
                     <button id="clear-btn" class="pta-btn secondary">清空日志</button>
                 </div>
             </div>
+            <div id="problems-tab" class="tab-pane">
+                <div id="pta-helper-problems" style="padding: 15px; font-size: 13px; overflow-y: auto; height: 100%;">
+                    <div style="text-align: center; color: #666; padding: 20px;">
+                        <p>点击"刷新题目列表"来查看当前题目的所有编程/函数题</p>
+                        <button id="refresh-problems-btn" class="pta-btn" style="margin-top: 10px;">刷新题目列表</button>
+                    </div>
+                    <div id="problems-list" style="margin-top: 15px;"></div>
+                </div>
+            </div>
             <div id="settings-tab" class="tab-pane">
                 <div id="pta-helper-settings">
+
+                    <!-- 重要设置区域 -->
+                    <div style="background: #f0f7ff; padding: 15px; border-radius: 8px; border: 1px solid #b3d9ff; margin-bottom: 20px;">
+                        <div style="font-weight: 600; color: #0056b3; margin-bottom: 12px; font-size: 14px;">⚡ 重要功能设置</div>
+
+                        <div class="setting-item checkbox-item" style="margin-bottom: 12px;">
+                            <input type="checkbox" id="auto-next-input" ${CONFIG.autoNext ? 'checked' : ''}>
+                            <label for="auto-next-input" style="color: #28a745; font-weight: bold; font-size: 13px;"> 完成后自动切换下一题型（推荐开启）</label>
+                        </div>
+                        <div style="font-size: 11px; color: #666; margin-bottom: 15px; padding-left: 25px;">
+                            开启后会自动完成判断题→单选题→多选题→填空题→编程题，无需手动切换
+                        </div>
+
+                        <div class="setting-item checkbox-item" style="margin-bottom: 12px;">
+                            <input type="checkbox" id="thinking-mode-input" ${CONFIG.thinkingMode ? 'checked' : ''}>
+                            <label for="thinking-mode-input" style="color: #007bff; font-weight: bold; font-size: 13px;"> 思考模式（提高正确率，降低速度）</label>
+                        </div>
+                        <div style="font-size: 11px; color: #666; margin-bottom: 8px; padding-left: 25px;">
+                            让AI更仔细分析题目，适合复杂题型，但答题速度会变慢
+                        </div>
+                    </div>
+
+                    <!-- API 配置区域 -->
+                    <div style="font-weight: 600; color: #333; margin-bottom: 10px; font-size: 13px; border-bottom: 1px solid #eee; padding-bottom: 5px;">🔌 API 配置</div>
+
                     <div class="setting-item">
                         <label>API 地址:</label>
                         <input type="text" id="api-url-input" value="${CONFIG.apiUrl}" placeholder="http://localhost:3000">
@@ -353,14 +466,10 @@
                         <label>API Key:</label>
                         <input type="text" id="api-key-input" value="${AUTH.apiKey}" placeholder="输入你的API Key">
                     </div>
-                    <div class="setting-item checkbox-item">
-                        <input type="checkbox" id="auto-next-input" ${CONFIG.autoNext ? 'checked' : ''}>
-                        <label for="auto-next-input">完成后自动切换下一题型</label>
-                    </div>
-                    <div class="setting-item checkbox-item">
-                        <input type="checkbox" id="thinking-mode-input" ${CONFIG.thinkingMode ? 'checked' : ''}>
-                        <label for="thinking-mode-input" style="color: #007bff; font-weight: bold;">思考模式（提高正确率，降低速度）</label>
-                    </div>
+
+                    <!-- 代码设置区域 -->
+                    <div style="font-weight: 600; color: #333; margin: 20px 0 10px 0; font-size: 13px; border-bottom: 1px solid #eee; padding-bottom: 5px;">💻 代码设置</div>
+
                     <div class="setting-item checkbox-item">
                         <input type="checkbox" id="remove-comments-input" ${CONFIG.removeComments ? 'checked' : ''}>
                         <label for="remove-comments-input">提交前自动清除代码注释</label>
@@ -385,6 +494,7 @@
                             <option value="Rust" ${CONFIG.progLang === 'Rust' ? 'selected' : ''}>Rust</option>
                         </select>
                     </div>
+
                     <div style="font-size: 11px; color: #999; text-align: center; margin-top: 20px;">
                         设置将自动保存<br><br><br>
                         个人版本，仅供学习使用<br>
@@ -527,11 +637,30 @@
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById(`${tab.dataset.tab}-tab`).classList.add('active');
+
+      // 当切换到题目标签时，自动刷新题目列表
+      if (tab.dataset.tab === 'problems') {
+        setTimeout(refreshProblemsList, 300);
+      }
     };
     });
 
     // 实时保存逻辑
-    document.getElementById('auto-next-input').onchange = (e) => CONFIG.autoNext = e.target.checked;
+    document.getElementById('auto-next-input').onchange = (e) => {
+      CONFIG.autoNext = e.target.checked;
+      // 更新主页状态显示
+      const statusSpan = document.getElementById('auto-next-status');
+      if (statusSpan) {
+        statusSpan.style.color = e.target.checked ? '#28a745' : '#dc3545';
+        statusSpan.textContent = e.target.checked ? '🚀 自动切换开启' : '⚠️ 自动切换关闭';
+      }
+      // 添加日志提示
+      if (e.target.checked) {
+        addInfoLog('✅ 已启用自动切换功能，将完成所有题型', 'info');
+      } else {
+        addInfoLog('⚠️ 已关闭自动切换功能，仅处理当前题型', 'warn');
+      }
+    };
     document.getElementById('thinking-mode-input').onchange = (e) => CONFIG.thinkingMode = e.target.checked;
     document.getElementById('remove-comments-input').onchange = (e) => CONFIG.removeComments = e.target.checked;
     document.getElementById('func-lang-select').onchange = (e) => CONFIG.funcLang = e.target.value;
@@ -581,8 +710,107 @@
 
     stopBtn.onclick = () => {
     isRunning = false;
+    isStarting = false; // 重置启动标志
+    if (startTaskTimer) {
+      clearTimeout(startTaskTimer);
+      startTaskTimer = null;
+    }
     addInfoLog("正在停止...");
     };
+
+    // 题目列表功能
+    const refreshProblemsBtn = document.getElementById('refresh-problems-btn');
+    const problemsList = document.getElementById('problems-list');
+
+    // 刷新题目列表
+    function refreshProblemsList() {
+    console.log('[PTA Helper] 🔄 开始刷新题目列表...');
+
+    // 改进的题目选择器
+    const problemBtns = Array.from(document.querySelectorAll('a[href*="problemSetProblemId"]'))
+      .filter(btn => {
+        const href = btn.getAttribute('href');
+        const text = btn.textContent.trim();
+        return href && href.includes('problemSetProblemId=') && text;
+      });
+
+    console.log('[PTA Helper] 📋 找到题目数量:', problemBtns.length);
+
+    if (problemBtns.length === 0) {
+      problemsList.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">未找到题目，请确保在编程/函数题页面</div>';
+      return;
+    }
+
+    let html = '<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 6px; font-size: 12px;">';
+    html += '<strong>使用说明：</strong><br>';
+    html += '• 点击题目可从该题开始答题<br>';
+    html += '• ✅ 绿色 = 已完成 | ❌ 红色 = 未完成<br>';
+    html += `• 当前设置: 从第 ${startFromIndex > 0 ? startFromIndex + 1 : 1} 题开始`;
+    html += '</div>';
+
+    problemBtns.forEach((btn, index) => {
+      const isPassed = btn.querySelector('.PROBLEM_ACCEPTED_iri62') ||
+                      btn.querySelector('.fa-check-circle') ||
+                      btn.querySelector('[class*="accepted"]');
+      const title = btn.textContent.trim();
+      const isSelected = index === startFromIndex;
+
+      const itemHtml = `
+        <div class="problem-item ${isSelected ? 'selected' : ''} ${isPassed ? 'passed' : 'not-passed'}" data-index="${index}">
+          <div class="problem-number">${index + 1}</div>
+          <div class="problem-status ${isPassed ? 'passed' : 'not-passed'}">
+            ${isPassed ? '✅ 已完成' : '❌ 未完成'}
+          </div>
+          <div class="problem-title" title="${title}">${title}</div>
+          ${isSelected ? '<div class="start-indicator">从这里开始</div>' : ''}
+        </div>
+      `;
+      html += itemHtml;
+    });
+
+    problemsList.innerHTML = html;
+    addInfoLog(`已刷新题目列表，共 ${problemBtns.length} 题`);
+
+    // 绑定点击事件
+    document.querySelectorAll('.problem-item').forEach(item => {
+      item.onclick = () => {
+        const index = parseInt(item.dataset.index);
+
+        console.log('[PTA Helper] 🎯 用户选择了第', index + 1, '题作为起始题目');
+        console.log('[PTA Helper] 📍 设置前 startFromIndex:', startFromIndex);
+
+        startFromIndex = index;
+        console.log('[PTA Helper] 📍 设置后 startFromIndex:', startFromIndex);
+
+        // 更新UI显示
+        document.querySelectorAll('.problem-item').forEach(i => {
+          i.classList.remove('selected');
+          const indicator = i.querySelector('.start-indicator');
+          if (indicator) indicator.remove();
+        });
+
+        item.classList.add('selected');
+        const indicator = document.createElement('div');
+        indicator.className = 'start-indicator';
+        indicator.textContent = '从这里开始';
+        item.appendChild(indicator);
+
+        addInfoLog(`✅ 已设置从第 ${index + 1} 题开始答题`, 'info');
+        addInfoLog(`💡 提示：点击"开始答题"按钮将自动跳过前面的题目`, 'info');
+
+        // 更新主页状态显示
+        const statusBar = document.querySelector('#pta-status-bar div:last-child');
+        if (statusBar) {
+          statusBar.textContent = `从第 ${index + 1} 题开始`;
+        }
+      };
+    });
+    }
+
+    // 绑定刷新按钮事件
+    if (refreshProblemsBtn) {
+      refreshProblemsBtn.onclick = refreshProblemsList;
+    }
 
     // --- 4. 拖拽逻辑 ---
     let isDragging = false;
@@ -1717,13 +1945,51 @@
     }
 
     async function solveCodeProblems(type) {
-    const problemBtns = document.querySelectorAll('a[href*="problemSetProblemId"]');
-    if (problemBtns.length === 0) { addInfoLog("未找到题目按钮"); return; }
+    // 记录本次任务的起始索引（避免在执行过程中被重置）
+    const currentStartIndex = Math.max(0, Math.min(startFromIndex, 999));
+
+    console.log('[PTA Helper] 🎯 solveCodeProblems 开始执行');
+    console.log('[PTA Helper] 📍 当前设置的起始索引:', startFromIndex);
+    console.log('[PTA Helper] 📍 本任务的起始索引:', currentStartIndex);
+
+    // 改进的题目选择器，更精确地匹配题目按钮
+    const problemBtns = Array.from(document.querySelectorAll('a[href*="problemSetProblemId"]'))
+      .filter(btn => {
+        // 过滤掉重复或非题目元素
+        const href = btn.getAttribute('href');
+        const text = btn.textContent.trim();
+        // 确保有有效的problemSetProblemId参数
+        return href && href.includes('problemSetProblemId=') && text;
+      });
+
+    if (problemBtns.length === 0) {
+      addInfoLog("未找到题目按钮");
+      return;
+    }
+
+    // 显示调试信息
+    console.log('[PTA Helper] 📋 检测到的题目列表:');
+    problemBtns.forEach((btn, index) => {
+      const isPassed = btn.querySelector('.PROBLEM_ACCEPTED_iri62');
+      const title = btn.textContent.trim().substring(0, 30);
+      console.log(`[PTA Helper] ${index + 1}. ${title}... ${isPassed ? '(✅已通过)' : '(❌未完成)'}`);
+    });
 
     const targetLang = type === 'FUNC' ? CONFIG.funcLang : CONFIG.progLang;
-    addInfoLog(`[${type === 'FUNC' ? '函数题' : '编程题'}] 共有 ${problemBtns.length} 题，预设语言: ${targetLang}`);
+    const startIndex = Math.max(0, Math.min(currentStartIndex, problemBtns.length - 1));
+    const actualCount = problemBtns.length;
+    const startCount = startIndex + 1;
 
-    for (let i = 0; i < problemBtns.length; i++) {
+    if (startIndex > 0) {
+      addInfoLog(`[${type === 'FUNC' ? '函数题' : '编程题'}] 共有 ${actualCount} 题，从第 ${startCount} 题开始，预设语言: ${targetLang}`);
+    } else {
+      addInfoLog(`[${type === 'FUNC' ? '函数题' : '编程题'}] 共有 ${actualCount} 题，预设语言: ${targetLang}`);
+    }
+
+    // 注意：不在这里重置 startFromIndex，而是在真正开始执行后才重置
+    console.log('[PTA Helper] 🚀 准备从第', startIndex + 1, '题开始处理');
+
+    for (let i = startIndex; i < problemBtns.length; i++) {
       if (!isRunning) return;
 
       const btn = problemBtns[i];
@@ -1731,6 +1997,13 @@
         addInfoLog(`第 ${i + 1} 题已通过，跳过`); continue;
       }
       addInfoLog(`正在解决第 ${i + 1} 题...`);
+
+      // 在真正开始处理第一题时，重置起始索引（避免影响后续任务）
+      if (i === startIndex) {
+        console.log('[PTA Helper] ✅ 开始处理第', i + 1, '题，重置起始索引');
+        startFromIndex = 0;
+      }
+
       btn.click();
       await new Promise(r => setTimeout(r, 2500));
 
@@ -1866,7 +2139,12 @@
     // --- 9. 主逻辑入口 ---
     async function solveCurrentPage() {
     console.log('[PTA Helper] 🚀 solveCurrentPage 函数被调用!');
-    if (isRunning) return;
+
+    // 防止重复启动
+    if (isRunning) {
+      addInfoLog("⚠️ 任务正在运行中，请勿重复点击", 'warn');
+      return;
+    }
 
     // 检查API配置
     if (!CONFIG.apiUrl || !AUTH.apiKey) {
@@ -1877,9 +2155,17 @@
     console.log('[PTA Helper] ✅ API配置检查通过，开始答题...');
 
     isRunning = true;
+    isStarting = false; // 重置启动标志
     startBtn.disabled = true;
     startBtn.innerText = "运行中...";
     stopBtn.style.display = 'inline-block';
+
+    // 显示功能状态
+    if (CONFIG.autoNext) {
+      addInfoLog('🚀 自动切换功能已启用，完成所有题型', 'info');
+    } else {
+      addInfoLog('⚠️ 自动切换功能已关闭，仅处理当前题型', 'warn');
+    }
 
     while (isRunning) {
       const tfTab = document.getElementById('TRUE_OR_FALSE');
@@ -1938,16 +2224,51 @@
 
     function stopTask() {
     isRunning = false;
+    isStarting = false; // 重置启动标志
+    if (startTaskTimer) {
+      clearTimeout(startTaskTimer);
+      startTaskTimer = null;
+    }
     startBtn.disabled = false;
     startBtn.innerText = "开始答题";
     stopBtn.style.display = 'none';
+
+    // 重置主页状态显示
+    const statusBar = document.querySelector('#pta-status-bar div:last-child');
+    if (statusBar) {
+      statusBar.textContent = startFromIndex > 0 ? `从第 ${startFromIndex + 1} 题开始` : '从头开始';
+    }
     }
 
     console.log('[PTA Helper] 🔧 绑定按钮事件...');
     const startButton = document.getElementById('start-btn');
     console.log('[PTA Helper] 🎯 找到开始按钮:', startButton);
     if (startButton) {
-      startButton.onclick = solveCurrentPage;
+      // 添加 debounce 防止多次点击
+      startButton.onclick = () => {
+        if (isStarting) {
+          addInfoLog("⚠️ 正在启动中，请勿重复点击", 'warn');
+          return;
+        }
+
+        if (isRunning) {
+          addInfoLog("⚠️ 任务正在运行中，请勿重复点击", 'warn');
+          return;
+        }
+
+        // 清除之前的定时器
+        if (startTaskTimer) {
+          clearTimeout(startTaskTimer);
+        }
+
+        // 设置新的启动定时器（500ms debounce）
+        isStarting = true;
+        startTaskTimer = setTimeout(() => {
+          console.log('[PTA Helper] 🎯 开始答题被点击');
+          addInfoLog(`🎯 开始答题任务...${startFromIndex > 0 ? `从第 ${startFromIndex + 1} 题开始` : ''}`);
+          solveCurrentPage();
+        }, 500);
+      };
       console.log('[PTA Helper] ✅ 按钮事件绑定成功!');
     } else {
       console.log('[PTA Helper] ❌ 未找到开始按钮!');
