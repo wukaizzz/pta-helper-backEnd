@@ -1802,25 +1802,48 @@
           );
 
           if (submitBtn) {
-            addInfoLog(`[提示] 代码已填写完毕，请手动检查并提交`);
-            // 已禁用自动提交 - submitBtn.click();
+            addInfoLog(`[自动提交] 代码已填写完毕，正在自动提交...`);
 
-            addInfoLog(`[等待] 等待提交结果返回...`);
+            // 启用自动提交
+            submitBtn.click();
+
+            addInfoLog(`[等待提交] 等待测评结果返回...`);
             let foundResult = false;
-            for (let attempt = 0; attempt < 15; attempt++) {
+
+            // 增加等待时间到30次（30秒）
+            for (let attempt = 0; attempt < 30; attempt++) {
               if (!isRunning) break;
-              const closeBtn = document.querySelector('button[data-e2e="modal-close-btn"]');
+
+              // 查找多种可能的关闭按钮选择器
+              const closeBtn = document.querySelector('button[data-e2e="modal-close-btn"]') ||
+                              document.querySelector('.pc-button.pc-button-borderless') ||
+                              Array.from(document.querySelectorAll('button')).find(b =>
+                                b.querySelector('svg')?.querySelector('use')?.getAttribute('xlink:href')?.includes('close')
+                              );
+
               if (closeBtn) {
-                addInfoLog(`[成功] 检测到提交结果窗口，准备关闭...`);
+                addInfoLog(`[测评完成] 检测到提交结果窗口，准备关闭...`);
+                await new Promise(r => setTimeout(r, 500)); // 稍微等待一下让用户看到结果
                 closeBtn.click();
                 foundResult = true;
+
+                // 等待面板关闭后再继续
+                await new Promise(r => setTimeout(r, 1000));
                 break;
               }
+
+              // 每5次尝试输出一次进度
+              if (attempt % 5 === 0) {
+                addInfoLog(`[等待中] 正在等待测评结果... (${attempt + 1}/30)`);
+              }
+
               await new Promise(r => setTimeout(r, 1000));
             }
 
             if (!foundResult && isRunning) {
-              addInfoLog(`[警告] 提交后未检测到结果反馈，请检查。`, false);
+              addInfoLog(`[警告] 提交后30秒内未检测到结果反馈，可能评测时间较长，请手动检查。`, false);
+            } else if (foundResult) {
+              addInfoLog(`[成功] 测评完成，已关闭结果面板，继续下一题...`);
             }
 
             updateLog(logItem, `已提交 (${targetLang})`, true);
