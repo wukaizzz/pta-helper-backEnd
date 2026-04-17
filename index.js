@@ -408,7 +408,7 @@
                     <div style="color: #666;">
                         <strong>当前状态:</strong>
                         <span id="auto-next-status" style="color: ${CONFIG.autoNext ? '#28a745' : '#dc3545'}; font-weight: 600;">
-                            ${CONFIG.autoNext ? '🚀 自动切换开启' : '⚠️ 自动切换关闭'}
+                            ${CONFIG.autoNext ? ' 自动切换开启' : ' 自动切换关闭'}
                         </span>
                     </div>
                     <div style="color: #999; font-size: 11px;">
@@ -652,7 +652,7 @@
       const statusSpan = document.getElementById('auto-next-status');
       if (statusSpan) {
         statusSpan.style.color = e.target.checked ? '#28a745' : '#dc3545';
-        statusSpan.textContent = e.target.checked ? '🚀 自动切换开启' : '⚠️ 自动切换关闭';
+        statusSpan.textContent = e.target.checked ? ' 自动切换开启' : ' 自动切换关闭';
       }
       // 添加日志提示
       if (e.target.checked) {
@@ -1406,7 +1406,7 @@
 
     // --- 8. 各类题型解决逻辑 ---
     async function solveTrueFalse() {
-    console.log('[PTA Helper] 🚀 solveTrueFalse 函数开始执行');
+    console.log('[PTA Helper]  solveTrueFalse 函数开始执行');
     const questions = document.querySelectorAll('div.pc-x[id]');
     console.log('[PTA Helper] 📋 找到判断题数量:', questions.length);
     if (questions.length === 0) return;
@@ -1987,7 +1987,7 @@
     }
 
     // 注意：不在这里重置 startFromIndex，而是在真正开始执行后才重置
-    console.log('[PTA Helper] 🚀 准备从第', startIndex + 1, '题开始处理');
+    console.log('[PTA Helper]  准备从第', startIndex + 1, '题开始处理');
 
     for (let i = startIndex; i < problemBtns.length; i++) {
       if (!isRunning) return;
@@ -2138,7 +2138,7 @@
 
     // --- 9. 主逻辑入口 ---
     async function solveCurrentPage() {
-    console.log('[PTA Helper] 🚀 solveCurrentPage 函数被调用!');
+    console.log('[PTA Helper]  solveCurrentPage 函数被调用!');
 
     // 防止重复启动
     if (isRunning) {
@@ -2162,9 +2162,9 @@
 
     // 显示功能状态
     if (CONFIG.autoNext) {
-      addInfoLog('🚀 自动切换功能已启用，完成所有题型', 'info');
+      addInfoLog(' 自动切换功能已启用，完成所有题型', 'info');
     } else {
-      addInfoLog('⚠️ 自动切换功能已关闭，仅处理当前题型', 'warn');
+      addInfoLog(' 自动切换功能已关闭，仅处理当前题型', 'warn');
     }
 
     while (isRunning) {
